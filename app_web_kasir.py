@@ -231,8 +231,8 @@ def buat_nota_pdf(no_nota, keranjang, total_bayar, tunai, kembalian, tgl_str=Non
 # SISTEM AUTENTIKASI LOGIN
 # ---------------------------------------------------------
 USERS = {
-    "admin": {"password": "adminpassword", "role": "Admin", "nama": "Manajer / Admin"},
-    "kasir": {"password": "kasirpassword", "role": "Kasir", "nama": "Petugas Kasir"}
+    "admin": {"password": "semogasukses", "role": "Admin", "nama": "Manajer / Admin"},
+    "kasir": {"password": "hidupkasir", "role": "Kasir", "nama": "Petugas Kasir"}
 }
 
 def login_page():
@@ -252,12 +252,7 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Username atau Password salah!")
-                
-        st.info("""
-        **Akun Bawaan:**
-        * **Admin:** Username `admin` | Password `adminpassword`
-        * **Kasir:** Username `kasir` | Password `kasirpassword`
-        """)
+    
 
 # ---------------------------------------------------------
 # MAIN APP INTERFACE
