@@ -137,35 +137,49 @@ def cari_nota_di_db(no_nota_cari):
         return {"header": header_info, "items": items}
     return None
 
-def ambil_laporan_harian(tanggal_pilihan):
-    """Membaca semua transaksi berdasarkan tanggal"""
+def ambil_laporan_harian_per_nota(tanggal_pilihan):
+    """Membaca transaksi dikelompokkan per Nota untuk tanggal tertentu"""
     if not os.path.exists(DB_FILE):
-        return [], 0
+        return {}, 0, 0
     wb = openpyxl.load_workbook(DB_FILE)
     if "Transaksi" not in wb.sheetnames:
-        return [], 0
+        return {}, 0, 0
+    
     ws_trans = wb["Transaksi"]
-    transaksi_harian = []
-    total_omset = 0
+    nota_dict = {}
+    total_omset_harian = 0
+    
     tgl_str = tanggal_pilihan.strftime("%Y-%m-%d")
     
     for row in ws_trans.iter_rows(min_row=2, values_only=True):
         if row[1]:
             tgl_transaksi = str(row[1]).split(" ")[0]
             if tgl_transaksi == tgl_str:
-                transaksi_harian.append({
-                    "No Nota": row[0],
-                    "Jam": str(row[1]).split(" ")[1] if " " in str(row[1]) else "-",
+                no_nota = row[0]
+                if no_nota not in nota_dict:
+                    nota_dict[no_nota] = {
+                        "header": {
+                            "no_nota": no_nota,
+                            "tanggal": row[1],
+                            "jam": str(row[1]).split(" ")[1] if " " in str(row[1]) else "-",
+                            "total_belanja": row[7],
+                            "metode_bayar": row[8] if len(row) > 8 else "Cash / Tunai",
+                            "tunai": row[9] if len(row) > 9 else row[7],
+                            "kembalian": row[10] if len(row) > 10 else 0
+                        },
+                        "items": []
+                    }
+                    total_omset_harian += int(row[7])
+                
+                nota_dict[no_nota]["items"].append({
                     "Kode": row[2],
                     "Nama Produk": row[3],
                     "Qty": row[4],
-                    "Harga": row[5],
-                    "Subtotal (Rp)": row[6],
-                    "Metode": row[8] if len(row) > 8 else "Cash / Tunai"
+                    "Harga Satuan (Rp)": f"Rp {row[5]:,}",
+                    "Total (Rp)": f"Rp {row[6]:,}"
                 })
-                total_omset += int(row[6])
                 
-    return transaksi_harian, total_omset
+    return nota_dict, total_omset_harian, len(nota_dict)
 
 # ---------------------------------------------------------
 # GENERATE PDF & QR CODE
@@ -203,7 +217,12 @@ def buat_nota_pdf(no_nota, keranjang, total_bayar, metode_bayar, tunai, kembalia
     
     table_data = [["Item", "Qty", "Harga", "Total"]]
     for item in keranjang:
-        table_data.append([item["nama"], str(item["qty"]), f"{item['harga']:,}", f"{item['subtotal']:,}"])
+        nama = item.get("nama") or item.get("Nama Produk", "")
+        qty = item.get("qty") or item.get("Qty", 1)
+        harga = item.get("harga") or item.get("Harga", 0)
+        subtotal = item.get("subtotal") or item.get("Subtotal", 0)
+        
+        table_data.append([nama, str(qty), f"{harga:,}" if isinstance(harga, int) else str(harga), f"{subtotal:,}" if isinstance(subtotal, int) else str(subtotal)])
         
     t = Table(table_data, colWidths=[95, 25, 45, 55])
     t.setStyle(TableStyle([
@@ -442,16 +461,16 @@ def main():
                     st.session_state.keranjang = []
 
     # -----------------------------------------------------
-    # MENU 2: LAPORAN PENJUALAN HARIAN
+    # MENU 2: LAPORAN PENJUALAN HARIAN (PER NOTA)
     # -----------------------------------------------------
     elif menu == "📅 Laporan Penjualan Harian":
-        st.title("📅 Laporan Transaksi Harian")
+        st.title("📅 Laporan Transaksi Harian (Per Nota)")
         
         col_tgl, col_space = st.columns([1, 2])
         with col_tgl:
             tgl_pilih = st.date_input("Pilih Tanggal Laporan", datetime.now())
             
-        transaksi, omset = ambil_laporan_harian(tgl_pilih)
+        nota_dict, omset, total_nota = ambil_laporan_harian_per_nota(tgl_pilih)
         
         st.divider()
         
@@ -459,12 +478,30 @@ def main():
         with col_m1:
             st.metric(label="Total Omset Harian", value=f"Rp {omset:,}")
         with col_m2:
-            st.metric(label="Total Item Terjual", value=f"{len(transaksi)} item")
+            st.metric(label="Total Transaksi (Nota)", value=f"{total_nota} Nota")
             
-        st.subheader(f"Detail Transaksi Tanggal: {tgl_pilih.strftime('%d %B %Y')}")
+        st.subheader(f"Daftar Nota Tanggal: {tgl_pilih.strftime('%d %B %Y')}")
         
-        if transaksi:
-            st.dataframe(transaksi, use_container_width=True)
+        if nota_dict:
+            for no_nota, data in nota_dict.items():
+                hdr = data["header"]
+                with st.expander(f"📄 **{no_nota}** | Jam: {hdr['jam']} | Total: **Rp {hdr['total_belanja']:,}** ({hdr['metode_bayar']})"):
+                    st.write(f"**Tanggal Transaksi:** {hdr['tanggal']}")
+                    st.write(f"**Metode Pembayaran:** {hdr['metode_bayar']}")
+                    st.write(f"**Nominal Bayar:** Rp {hdr['tunai']:,} | **Kembalian:** Rp {hdr['kembalian']:,}")
+                    
+                    st.write("#### Detail Barang Dibeli:")
+                    st.dataframe(data["items"], use_container_width=True)
+                    
+                    pdf_ulang = buat_nota_pdf(hdr['no_nota'], data["items"], hdr['total_belanja'], hdr['metode_bayar'], hdr['tunai'], hdr['kembalian'], str(hdr['tanggal']))
+                    with open(pdf_ulang, "rb") as f:
+                        st.download_button(
+                            label=f"📄 Cetak Ulang Struk {no_nota}",
+                            data=f,
+                            file_name=pdf_ulang,
+                            mime="application/pdf",
+                            key=f"dl_{no_nota}"
+                        )
         else:
             st.info("Belum ada transaksi pada tanggal ini.")
 
