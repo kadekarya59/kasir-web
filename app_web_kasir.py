@@ -31,9 +31,6 @@ def init_database():
             ["P003", "Teh Manis Dingin", 6000, 100, "Minuman", "🧃"],
             ["P004", "Mie Goreng Spesial", 22000, 25, "Makanan", "🍜"],
             ["P005", "Air Mineral 600ml", 4000, 80, "Minuman", "🍼"],
-            ["P006", "Snack Keripik Kentang", 12000, 40, "Snack", "🍿"],
-            ["P007", "Cokelat Bar 50g", 14000, 35, "Snack", "🍫"],
-            ["P008", "Es Krim Vanilla", 10000, 20, "Snack", "🍦"],
         ]
         for p in produk_awal:
             ws_produk.append(p)
@@ -45,7 +42,6 @@ def init_database():
         wb.save(DB_FILE)
 
 def load_produk():
-    """Membaca data produk dari file Excel"""
     init_database()
     wb = openpyxl.load_workbook(DB_FILE)
     ws = wb["Produk"]
@@ -61,8 +57,40 @@ def load_produk():
             }
     return produk_dict
 
+def tambah_atau_update_produk_db(kode, nama, harga, stok, kategori, icon):
+    """Menambah produk baru atau mengubah data produk yang sudah ada di Excel"""
+    wb = openpyxl.load_workbook(DB_FILE)
+    ws = wb["Produk"]
+    found = False
+    
+    for row in ws.iter_rows(min_row=2):
+        if str(row[0].value) == kode:
+            row[1].value = nama
+            row[2].value = harga
+            row[3].value = stok
+            row[4].value = kategori
+            row[5].value = icon
+            found = True
+            break
+            
+    if not found:
+        ws.append([kode, nama, harga, stok, kategori, icon])
+        
+    wb.save(DB_FILE)
+
+def hapus_produk_db(kode):
+    """Menghapus produk dari Excel berdasarkan kode"""
+    wb = openpyxl.load_workbook(DB_FILE)
+    ws = wb["Produk"]
+    
+    for row in ws.iter_rows(min_row=2):
+        if str(row[0].value) == kode:
+            ws.delete_rows(row[0].row)
+            break
+            
+    wb.save(DB_FILE)
+
 def update_stok_dan_simpan_transaksi(no_nota, keranjang, total_bayar, tunai, kembalian):
-    """Memperbarui stok dan menyimpan riwayat transaksi ke Excel"""
     wb = openpyxl.load_workbook(DB_FILE)
     ws_produk = wb["Produk"]
     ws_trans = wb["Transaksi"]
@@ -145,7 +173,7 @@ def buat_nota_pdf(no_nota, keranjang, total_bayar, tunai, kembalian, tgl_str=Non
     
     elements = []
     elements.append(Paragraph("<b>MINIMARKET MART DIGITAL</b>", style_title))
-    elements.append(Paragraph("Jl. Merdeka No. 123, Denpasar, Bali", style_center))
+    elements.append(Paragraph("Jl. Merdeka No. 123, Indonesia", style_center))
     elements.append(Paragraph("Telp: 0812-3456-7890", style_center))
     elements.append(Spacer(1, 6))
     elements.append(Paragraph("-" * 45, style_center))
@@ -200,12 +228,44 @@ def buat_nota_pdf(no_nota, keranjang, total_bayar, tunai, kembalian, tgl_str=Non
     return filename
 
 # ---------------------------------------------------------
-# STREAMLIT POS MINIMARKET INTERFACE
+# SISTEM AUTENTIKASI LOGIN
+# ---------------------------------------------------------
+USERS = {
+    "admin": {"password": "adminpassword", "role": "Admin", "nama": "Manajer / Admin"},
+    "kasir": {"password": "kasirpassword", "role": "Kasir", "nama": "Petugas Kasir"}
+}
+
+def login_page():
+    st.title("🔑 Login Kasir POS Minimarket")
+    st.caption("Masukkan Username dan Password Anda")
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        username_input = st.text_input("Username").strip().lower()
+        password_input = st.text_input("Password", type="password")
+        
+        if st.button("Masuk / Login", type="primary"):
+            if username_input in USERS and USERS[username_input]["password"] == password_input:
+                st.session_state.logged_in = True
+                st.session_state.user_info = USERS[username_input]
+                st.success(f"Selamat datang, {USERS[username_input]['nama']}!")
+                st.rerun()
+            else:
+                st.error("Username atau Password salah!")
+                
+        st.info("""
+        **Akun Bawaan:**
+        * **Admin:** Username `admin` | Password `adminpassword`
+        * **Kasir:** Username `kasir` | Password `kasirpassword`
+        """)
+
+# ---------------------------------------------------------
+# MAIN APP INTERFACE
 # ---------------------------------------------------------
 def main():
     st.set_page_config(page_title="POS Minimarket Kasir", page_icon="🏪", layout="wide")
     
-    # Custom CSS Styling Minimarket POS
+    # Custom CSS
     st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
@@ -234,27 +294,43 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Session State Keranjang Belanja
+    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        login_page()
+        return
+
+    # User Info Sidebar
+    user = st.session_state.user_info
+    st.sidebar.markdown(f"### 👤 {user['nama']}")
+    st.sidebar.caption(f"Akses: **{user['role']}**")
+    
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
+        
+    st.sidebar.divider()
+
+    # Pilihan Menu Sesuai Role
+    if user["role"] == "Admin":
+        menu_options = ["🛒 Mesin Kasir POS", "🛠️ Kelola Produk & Harga", "🔍 Cari / Lacak Nota", "📊 Stok & Database Produk"]
+    else:
+        # User Kasir hanya bisa Transaksi dan Cari Nota
+        menu_options = ["🛒 Mesin Kasir POS", "🔍 Cari / Lacak Nota"]
+
+    menu = st.sidebar.radio("Navigasi", menu_options)
+
     if "keranjang" not in st.session_state:
         st.session_state.keranjang = []
 
-    st.sidebar.title("🏪 POS MART")
-    menu = st.sidebar.radio("Navigasi", ["🛒 Mesin Kasir POS", "🔍 Cari / Lacak Nota", "📊 Stok & Database Produk"])
-    
     # -----------------------------------------------------
-    # MENU 1: MESIN KASIR MINIMARKET
+    # MENU 1: MESIN KASIR POS
     # -----------------------------------------------------
     if menu == "🛒 Mesin Kasir POS":
         st.title("🛒 Kasir Minimarket (POS)")
         produk_dict = load_produk()
-        
         col_catalog, col_cart = st.columns([2.2, 1.3])
         
-        # --- KOLOM KIRI: KATALOG PRODUK GRID ---
         with col_catalog:
             st.subheader("📦 Katalog Produk")
-            
-            # Filter & Cari Produk
             col_search, col_filter = st.columns([2, 1])
             with col_search:
                 search_query = st.text_input("🔍 Cari Barang / Kode...", "").strip().lower()
@@ -264,7 +340,6 @@ def main():
                 
             st.divider()
             
-            # Filter Produk berdasarkan input
             produk_filtered = {}
             for k, v in produk_dict.items():
                 match_search = (search_query in k.lower()) or (search_query in v["nama"].lower())
@@ -272,7 +347,6 @@ def main():
                 if match_search and match_kat:
                     produk_filtered[k] = v
 
-            # Tampilan Grid 3 Kolom
             grid_cols = st.columns(3)
             idx = 0
             for k, v in produk_filtered.items():
@@ -291,7 +365,6 @@ def main():
                         if qty_di_keranjang + 1 > v["stok"]:
                             st.toast(f"⚠️ Stok {v['nama']} tidak mencukupi!", icon="❌")
                         else:
-                            # Cek jika sudah ada di keranjang, tambah qty
                             found = False
                             for item in st.session_state.keranjang:
                                 if item["kode"] == k:
@@ -311,20 +384,15 @@ def main():
                             st.rerun()
                 idx += 1
 
-        # --- KOLOM KANAN: RINGKASAN BELANJA & KASIR ---
         with col_cart:
             st.subheader("📋 Struk Kasir")
-            
             if not st.session_state.keranjang:
                 st.info("Keranjang kosong. Klik produk di sebelah kiri untuk menambahkan.")
             else:
                 total_belanja = sum(i["subtotal"] for i in st.session_state.keranjang)
-                
-                # Tampilkan banner total belanja
                 st.markdown(f'<div class="total-banner">TOTAL: Rp {total_belanja:,}</div>', unsafe_allow_html=True)
                 st.write("")
                 
-                # Daftar Item di Keranjang
                 for idx, item in enumerate(st.session_state.keranjang):
                     c_nama, c_qty, c_sub = st.columns([2, 1, 1])
                     with c_nama:
@@ -336,31 +404,25 @@ def main():
                         st.write(f"**Rp {item['subtotal']:,}**")
                     st.divider()
 
-                col_b1, col_b2 = st.columns(2)
-                with col_b1:
-                    if st.button("🗑️ Batal All", use_container_width=True):
-                        st.session_state.keranjang = []
-                        st.rerun()
+                if st.button("🗑️ Batal All", use_container_width=True):
+                    st.session_state.keranjang = []
+                    st.rerun()
 
-                # Form Pembayaran
                 st.subheader("💳 Pembayaran")
                 tunai = st.number_input("Bayar / Tunai (Rp)", min_value=total_belanja, value=float(total_belanja), step=5000.0)
                 kembalian = tunai - total_belanja
-                
                 st.success(f"Kembalian: **Rp {int(kembalian):,}**")
                 
                 if st.button("🔴 CETAK STRUK / BAYAR", type="primary", use_container_width=True):
                     no_nota = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    
                     update_stok_dan_simpan_transaksi(no_nota, st.session_state.keranjang, total_belanja, int(tunai), int(kembalian))
                     pdf_filename = buat_nota_pdf(no_nota, st.session_state.keranjang, total_belanja, int(tunai), int(kembalian))
                     
                     st.balloons()
                     st.success(f"Transaksi Selesai! Nota: **{no_nota}**")
-                    
                     with open(pdf_filename, "rb") as f:
                         st.download_button(
-                            label="📄 Download Struk PDF (Print)",
+                            label="📄 Download Struk PDF",
                             data=f,
                             file_name=pdf_filename,
                             mime="application/pdf",
@@ -369,11 +431,66 @@ def main():
                     st.session_state.keranjang = []
 
     # -----------------------------------------------------
-    # MENU 2: CARI NOTA
+    # MENU 2: KELOLA PRODUK & HARGA (KHUSUS ADMIN)
+    # -----------------------------------------------------
+    elif menu == "🛠️ Kelola Produk & Harga":
+        st.title("🛠️ Kelola Produk, Stok & Harga (Admin Only)")
+        produk_dict = load_produk()
+        
+        tab1, tab2 = st.tabs(["➕ Tambah / Edit Produk", "❌ Hapus Produk"])
+        
+        with tab1:
+            st.subheader("Tambah Produk Baru / Edit Produk")
+            pilihan_edit = st.selectbox("Pilih Produk yang Ingin Di-edit (Atau pilih 'Baru')", ["-- Buat Baru --"] + list(produk_dict.keys()))
+            
+            if pilihan_edit != "-- Buat Baru --":
+                info = produk_dict[pilihan_edit]
+                val_kode = pilihan_edit
+                val_nama = info["nama"]
+                val_harga = info["harga"]
+                val_stok = info["stok"]
+                val_kat = info["kategori"]
+                val_icon = info["icon"]
+            else:
+                val_kode = ""
+                val_nama = ""
+                val_harga = 10000
+                val_stok = 10
+                val_kat = "Makanan"
+                val_icon = "📦"
+
+            c1, c2 = st.columns(2)
+            with c1:
+                kode_p = st.text_input("Kode Produk (Unik)", value=val_kode)
+                nama_p = st.text_input("Nama Produk", value=val_nama)
+                harga_p = st.number_input("Harga (Rp)", min_value=100, value=val_harga, step=500)
+            with c2:
+                stok_p = st.number_input("Jumlah Stok", min_value=0, value=val_stok, step=1)
+                kategori_p = st.selectbox("Kategori", ["Makanan", "Minuman", "Snack", "Umum"])
+                icon_p = st.text_input("Ikon Emoji", value=val_icon)
+
+            if st.button("💾 Simpan Data Produk", type="primary"):
+                if kode_p and nama_p:
+                    tambah_atau_update_produk_db(kode_p, nama_p, harga_p, stok_p, kategori_p, icon_p)
+                    st.success(f"Produk {nama_p} berhasil disimpan ke Excel!")
+                    st.rerun()
+                else:
+                    st.error("Kode dan Nama Produk wajib diisi!")
+
+        with tab2:
+            st.subheader("Hapus Produk dari Spreadsheet")
+            kode_hapus = st.selectbox("Pilih Produk yang Akan Dihapus", list(produk_dict.keys()), format_func=lambda x: f"{x} - {produk_dict[x]['nama']}")
+            if st.button("🗑️ Hapus Produk Ini", type="primary"):
+                hapus_produk_db(kode_hapus)
+                st.success(f"Produk {kode_hapus} berhasil dihapus dari Excel!")
+                st.rerun()
+
+    # -----------------------------------------------------
+    # MENU 3: CARI NOTA
     # -----------------------------------------------------
     elif menu == "🔍 Cari / Lacak Nota":
         st.title("🔍 Lacak Transaksi Minimarket")
-        kode_input = st.text_input("Masukkan Kode Nota / ID Transaksi (misal: INV-20261011105022):").strip()
+        kode_input = st.text_input("Masukkan Kode Nota / ID Transaksi:").strip()
         
         if st.button("Cari Nota"):
             if kode_input:
@@ -382,7 +499,6 @@ def main():
                     hdr = hasil["header"]
                     st.success(f"Nota **{hdr['no_nota']}** Ditemukan!")
                     st.write(f"**Tanggal Transaksi:** {hdr['tanggal']}")
-                    st.write("#### Detail Barang:")
                     st.table(hasil["items"])
                     st.write(f"**Total Belanja:** Rp {hdr['total_belanja']:,}")
                     st.write(f"**Tunai:** Rp {hdr['tunai']:,}")
@@ -391,7 +507,7 @@ def main():
                     pdf_ulang = buat_nota_pdf(hdr['no_nota'], hasil["items"], hdr['total_belanja'], hdr['tunai'], hdr['kembalian'], str(hdr['tanggal']))
                     with open(pdf_ulang, "rb") as f:
                         st.download_button(
-                            label="📄 Cetak / Download Ulang Struk PDF",
+                            label="📄 Download Ulang Struk PDF",
                             data=f,
                             file_name=pdf_ulang,
                             mime="application/pdf"
@@ -400,7 +516,7 @@ def main():
                     st.error(f"Nota dengan Kode '{kode_input}' tidak ditemukan di database.")
 
     # -----------------------------------------------------
-    # MENU 3: STOK PRODUK
+    # MENU 4: STOK PRODUK (ADMIN ONLY)
     # -----------------------------------------------------
     elif menu == "📊 Stok & Database Produk":
         st.title("📊 Database & Stok Minimarket")
